@@ -1,12 +1,15 @@
 package broker
 
 import (
+	"embed"
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 
 	"gopkg.in/ini.v1"
 )
@@ -37,7 +40,20 @@ const (
 	AllUsersKey = "ALL"
 	// OwnerUserKey is the key for allowing access the owner
 	OwnerUserKey = "OWNER"
+
+	// ownerAutoregistrationConfigPath is the name of the file that will be auto-generated to register the owner
+	ownerRegistrationConfigPath     = "20-owner-autoregistration.conf"
+	ownerRegistrationConfigTemplate = "templates/20-owner-autoregistration.conf.tmpl"
 )
+
+var (
+	//go:embed templates/20-owner-autoregistration.conf.tmpl
+	ownerRegistrationConfig embed.FS
+)
+
+type templateEnv struct {
+	Owner string
+}
 
 type userConfig struct {
 	clientID     string
@@ -51,9 +67,13 @@ type userConfig struct {
 	allowedSSHSuffixes []string
 }
 
+func getDropInDir(cfgPath string) string {
+	return cfgPath + ".d"
+}
+
 func getDropInFiles(cfgPath string) ([]any, error) {
 	// Check if a .d directory exists and return the paths to the files in it.
-	dropInDir := cfgPath + ".d"
+	dropInDir := getDropInDir(cfgPath)
 	files, err := os.ReadDir(dropInDir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -163,7 +183,28 @@ func (uc *userConfig) OwnerIsUnset() bool {
 	return uc.owner == nil
 }
 
-func (uc *userConfig) PersistOwner(userName string) error {
+func (uc *userConfig) PersistOwner(cfgPath, userName string) error {
 	uc.owner = &userName
+	p := filepath.Join(getDropInDir(cfgPath), ownerRegistrationConfigPath)
+
+	templateName := strings.SplitN(ownerRegistrationConfigTemplate, "/", 2)[1]
+	t, err := template.New(templateName).ParseFS(ownerRegistrationConfig, ownerRegistrationConfigTemplate)
+	if err != nil {
+		slog.Error(fmt.Sprintf("Failed to open autoregastration template: %v", err))
+		return err
+	}
+
+	f, err := os.Create(p)
+	if err != nil {
+		slog.Error(fmt.Sprintf("Failed to create owner registration file: %v", err))
+		return err
+	}
+
+	err = t.Execute(f, templateEnv{Owner: *uc.owner})
+	if err != nil {
+		slog.Error(fmt.Sprintf("Failed to write owner registration file: %v", err))
+		return err
+	}
+
 	return nil
 }

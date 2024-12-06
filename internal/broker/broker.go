@@ -648,7 +648,7 @@ func (b *Broker) userIsAllowed(userName string) bool {
 			allowed = true
 		}
 		if b.cfg.userConfig.OwnerIsUnset() {
-			b.cfg.PersistOwner(userName)
+			b.cfg.PersistOwner(b.cfg.ConfigFile, userName)
 		}
 	}
 
