@@ -45,17 +45,6 @@ type Config struct {
 	userConfig
 }
 
-type userConfig struct {
-	clientID     string
-	clientSecret string
-	issuerURL    string
-
-	allowedUsers       map[string]bool
-	owner              string
-	homeBaseDir        string
-	allowedSSHSuffixes []string
-}
-
 // Broker is the real implementation of the broker to track sessions and process oidc calls.
 type Broker struct {
 	cfg Config
@@ -621,6 +610,9 @@ func (b *Broker) handleIsAuthenticated(ctx context.Context, session *session, au
 			return AuthDenied, errorMessage{Message: "could not store password"}
 		}
 	}
+	if !b.userIsAllowed(authInfo.UserInfo.Name) {
+		return AuthDenied, errorMessage{Message: "permission denied"}
+	}
 
 	if session.isOffline {
 		return AuthGranted, userInfoMessage{UserInfo: authInfo.UserInfo}
@@ -636,6 +628,31 @@ func (b *Broker) handleIsAuthenticated(ctx context.Context, session *session, au
 	token.CleanupOldEncryptedToken(session.oldEncryptedTokenPath)
 
 	return AuthGranted, userInfoMessage{UserInfo: authInfo.UserInfo}
+}
+
+func (b *Broker) userIsAllowed(userName string) bool {
+	// The user is allowed to login if:
+	// - ALL users are allowed
+	// - the user's name is in the list of allowed_users
+	// - the user is the owner of the machine
+	allowed := false
+	if b.cfg.userConfig.AllUsersAllowed() {
+		allowed = true
+	}
+	if b.cfg.userConfig.IsUserAllowed(userName) {
+		allowed = true
+	}
+	// If the user is allowed
+	if b.cfg.userConfig.OwnerUserAllowed() {
+		if b.cfg.userConfig.IsOwner(userName) {
+			allowed = true
+		}
+		if b.cfg.userConfig.OwnerIsUnset() {
+			b.cfg.PersistOwner(userName)
+		}
+	}
+
+	return allowed
 }
 
 func (b *Broker) startAuthenticate(sessionID string) (context.Context, error) {

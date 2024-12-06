@@ -39,6 +39,18 @@ const (
 	OwnerUserKey = "OWNER"
 )
 
+type userConfig struct {
+	clientID     string
+	clientSecret string
+	issuerURL    string
+
+	allowedUsers map[string]bool
+	// we use a pointer for the owner to differentiate between unset and an empty value
+	owner              *string
+	homeBaseDir        string
+	allowedSSHSuffixes []string
+}
+
 func getDropInFiles(cfgPath string) ([]any, error) {
 	// Check if a .d directory exists and return the paths to the files in it.
 	dropInDir := cfgPath + ".d"
@@ -69,7 +81,10 @@ func parseUsersSection(cfg *userConfig, users *ini.Section) {
 
 	cfg.homeBaseDir = users.Key(homeDirKey).String()
 	cfg.allowedSSHSuffixes = strings.Split(users.Key(sshSuffixesKey).String(), ",")
-	cfg.owner = users.Key(ownerKey).String()
+	if users.HasKey(ownerKey) {
+		o := users.Key(ownerKey).String()
+		cfg.owner = &o
+	}
 
 	if cfg.allowedUsers == nil {
 		cfg.allowedUsers = make(map[string]bool)
@@ -121,4 +136,34 @@ func parseConfigFile(cfgPath string) (userConfig, error) {
 	parseUsersSection(&cfg, iniCfg.Section(usersSection))
 
 	return cfg, nil
+}
+
+func (uc *userConfig) IsUserAllowed(user string) bool {
+	r, ok := uc.allowedUsers[user]
+	if !ok {
+		return false
+	}
+	return r
+}
+
+func (uc *userConfig) AllUsersAllowed() bool {
+	return uc.IsUserAllowed(AllUsersKey)
+}
+
+func (uc *userConfig) OwnerUserAllowed() bool {
+	return uc.IsUserAllowed(OwnerUserKey)
+}
+
+func (uc *userConfig) IsOwner(userName string) bool {
+	// If owner is undefined, then the first user to login is considered the owner
+	return uc.owner == nil || *uc.owner == userName
+}
+
+func (uc *userConfig) OwnerIsUnset() bool {
+	return uc.owner == nil
+}
+
+func (uc *userConfig) PersistOwner(userName string) error {
+	uc.owner = &userName
+	return nil
 }
